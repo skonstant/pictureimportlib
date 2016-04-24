@@ -7,7 +7,6 @@ import android.app.ProgressDialog;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -243,18 +242,11 @@ public class ImportPictureActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, final Intent data) {
         if (resultCode == Activity.RESULT_OK) {
-            if (requestCode == REQ_FROM_GALLERY && data != null) {
+            if (requestCode == REQ_FROM_GALLERY) {
                 if (progressDialog == null) {
                     progressDialog = new ProgressDialog(this);
                     progressDialog.setMessage(getString(R.string.please_wait));
                     progressDialog.show();
-                    progressDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-                        @Override
-                        public void onDismiss(DialogInterface dialog) {
-                            setResult(Activity.RESULT_CANCELED);
-                            finish();
-                        }
-                    });
                 }
 
                 new Thread() {
@@ -262,260 +254,233 @@ public class ImportPictureActivity extends Activity {
                     public void run() {
                         super.run();
                         try {
-                            Bitmap bitmap;
-                            try {
-                                File file = new File(getCacheDir() + "/tmp/" + mImageUri.getLastPathSegment());
-                                bitmap = Picasso.with(ImportPictureActivity.this).load(file).memoryPolicy(MemoryPolicy.NO_CACHE, MemoryPolicy.NO_STORE)
-                                        .networkPolicy(NetworkPolicy.NO_CACHE).get();
-                                file.delete();
-                            } catch (IOException e) {
-                                bitmap = MediaStore.Images.Media.getBitmap(getContentResolver(), data.getData());
-                                final int orientation;
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && DocumentsContract.isDocumentUri(ImportPictureActivity.this, data.getData()) &&
-                                        (ContextCompat.checkSelfPermission(ImportPictureActivity.this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)) {
-                                    orientation = getOrientationForDocuments(ImportPictureActivity.this, data.getData());
-                                } else {
-                                    orientation = getOrientationForMedia(ImportPictureActivity.this, data.getData());
-                                }
+                            Bitmap bitmap = loadBitmap(data);
 
-                                //for phones that dont give us orientation data
-                                int tempOrientation = 0;
-                                if (orientation == ExifInterface.ORIENTATION_UNDEFINED) {
-                                    File imageFile = getFromMediaUriPfd(ImportPictureActivity.this, ImportPictureActivity.this.getContentResolver(), data.getData());
-                                    ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
-                                    switch (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)) {
-                                        case ExifInterface.ORIENTATION_ROTATE_90:
-                                            tempOrientation = 90;
-                                            break;
-                                        case ExifInterface.ORIENTATION_ROTATE_180:
-                                            tempOrientation = 180;
-                                            break;
-                                        case ExifInterface.ORIENTATION_ROTATE_270:
-                                            tempOrientation = 270;
-                                            break;
-                                        default:
-                                            tempOrientation = 0;
-                                            break;
-                                    }
-                                }
-
-                                Matrix matrix = new Matrix();
-                                if (orientation != ExifInterface.ORIENTATION_UNDEFINED) {
-                                    matrix.preRotate(orientation);
-                                } else if (tempOrientation != ExifInterface.ORIENTATION_UNDEFINED) {
-                                    matrix.preRotate(tempOrientation);
-                                }
-
-                                Bitmap rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-                                if (bitmap != rotatedBitmap) {
-                                    bitmap.recycle();
-                                    bitmap = rotatedBitmap;
-                                }
+                            if (bitmap == null) {
+                                Log.e(TAG, "could not load bitmap, bailing out");
+                                finish();
+                                return;
                             }
 
                             if (getIntent().getBooleanExtra(ARG_CROP, false) && getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
-                                File photoFile = createTemporaryFile("picture", ".jpg");
-                                FileOutputStream stream = null;
-                                try {
-                                    stream = new FileOutputStream(photoFile);
-                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-                                    bitmap.recycle();
-                                    stream.flush();
-                                    stream.close();
-                                    Intent intent = new Intent("com.android.camera.action.CROP");
-                                    intent.setDataAndType(FileProvider.getUriForFile(ImportPictureActivity.this, getString(R.string.filesAuthority), photoFile),
-                                            "image/*");
-
-                                    mImageUri = FileProvider.getUriForFile(ImportPictureActivity.this, getString(R.string.filesAuthority), photoFile);
-
-                                    PackageManager pm = getApplicationContext().getPackageManager();
-                                    for (ResolveInfo ri : pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
-                                        intent = new Intent("com.android.camera.action.CROP");
-                                        intent.setDataAndType(mImageUri,
-                                                "image/*");
-                                        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                        int width = getIntent().getIntExtra(ARG_WIDTH, -1);
-                                        int height = getIntent().getIntExtra(ARG_HEIGHT, -1);
-
-                                        intent.putExtra("aspectX", width);
-                                        intent.putExtra("aspectY", height);
-                                        intent.putExtra("outputX", width);
-                                        intent.putExtra("outputY", height);
-                                        intent.putExtra("scale", true);
-                                        intent.putExtra("return-data", true);
-                                        intent.setClassName(ri.activityInfo.applicationInfo.packageName,
-                                                ri.activityInfo.name);
-                                        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                        grantUriPermission(ri.activityInfo.applicationInfo.packageName, mImageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                                        intent.putExtra(MediaStore.EXTRA_OUTPUT, mImageUri);
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                                            intent.setClipData(ClipData.newRawUri(null, mImageUri));
-                                        }
-                                        startActivityForResult(intent, REQ_CROP);
-                                        break;
-                                    }
-
-                                } catch (Exception e) {
-                                    setResult(Activity.RESULT_CANCELED);
-                                    finish();
-                                    Log.e(TAG, "Exception: ", e);
-                                } finally {
-                                    if (stream != null) {
-                                        try {
-                                            stream.close();
-                                        } catch (IOException e) {
-                                            Log.e(TAG, "IOException: ", e);
-                                        }
-                                    }
-                                }
+                                startCropIntent(bitmap);
+                                return;
                             } else {
-                                Bitmap scaled;
-                                if (getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
-                                    scaled = scaleCenterCrop(bitmap, getIntent().getIntExtra(ARG_HEIGHT, -1), getIntent().getIntExtra(ARG_WIDTH, -1));
-                                    bitmap.recycle();
-                                } else {
-                                    scaled = bitmap;
-                                }
-
-                                File photoFile = new File(getCacheDir() + "/pictureimportlib/", "pictureimportlib" + System.currentTimeMillis() + ".jpg");
-                                FileOutputStream stream = null;
-                                try {
-                                    stream = new FileOutputStream(photoFile);
-                                    scaled.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-                                    scaled.recycle();
-                                    stream.flush();
-                                    Intent intent = new Intent();
-                                    intent.putExtra(RES_IMAGE_FILE, photoFile);
-                                    setResult(RESULT_OK, intent);
-                                    finish();
-                                    Log.d(TAG, "Image size on disk in kb: " + (photoFile.length() / 1024));
-                                } catch (Exception e) {
-                                    setResult(Activity.RESULT_CANCELED);
-                                    finish();
-                                    progressDialog.dismiss();
-                                    Log.e(TAG, "Exception: ", e);
-                                } finally {
-                                    if (stream != null) {
-                                        try {
-                                            stream.close();
-                                        } catch (IOException e) {
-                                            Log.e(TAG, "IOException: ", e);
-                                        }
-                                    }
-                                }
+                                processBitmapAndReturn(bitmap);
                             }
                         } catch (Exception e) {
                             Log.e(TAG, "Exception: ", e);
                             setResult(Activity.RESULT_CANCELED);
-                            progressDialog.dismiss();
                             finish();
+                        } finally {
+                            progressDialog.dismiss();
                         }
                     }
                 }.start();
             } else if (requestCode == REQ_CROP) {
+                Log.d(TAG, "result from crop");
+
                 new Thread() {
                     @Override
                     public void run() {
                         super.run();
                         try {
-                            Bitmap bitmap;
-                            try {
-                                File file = new File(getCacheDir() + "/tmp/" + mImageUri.getLastPathSegment());
-                                bitmap = Picasso.with(ImportPictureActivity.this).load(file).memoryPolicy(MemoryPolicy.NO_CACHE, MemoryPolicy.NO_STORE)
-                                        .networkPolicy(NetworkPolicy.NO_CACHE).get();
-                                file.delete();
-                            } catch (IOException e) {
-                                bitmap = MediaStore.Images.Media.getBitmap(getContentResolver(), data.getData());
-                                final int orientation;
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && DocumentsContract.isDocumentUri(ImportPictureActivity.this, data.getData()) &&
-                                        (ContextCompat.checkSelfPermission(ImportPictureActivity.this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)) {
-                                    orientation = getOrientationForDocuments(ImportPictureActivity.this, data.getData());
-                                } else {
-                                    orientation = getOrientationForMedia(ImportPictureActivity.this, data.getData());
-                                }
+                            Bitmap bitmap = loadBitmap(data);
 
-                                //for phones that dont give us orientation data
-                                int tempOrientation = 0;
-                                if (orientation == ExifInterface.ORIENTATION_UNDEFINED) {
-                                    File imageFile = getFromMediaUriPfd(ImportPictureActivity.this, ImportPictureActivity.this.getContentResolver(), data.getData());
-                                    ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
-                                    switch (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)) {
-                                        case ExifInterface.ORIENTATION_ROTATE_90:
-                                            tempOrientation = 90;
-                                            break;
-                                        case ExifInterface.ORIENTATION_ROTATE_180:
-                                            tempOrientation = 180;
-                                            break;
-                                        case ExifInterface.ORIENTATION_ROTATE_270:
-                                            tempOrientation = 270;
-                                            break;
-                                        default:
-                                            tempOrientation = 0;
-                                            break;
-                                    }
-                                }
-
-                                Matrix matrix = new Matrix();
-                                if (orientation != ExifInterface.ORIENTATION_UNDEFINED) {
-                                    matrix.preRotate(orientation);
-                                } else if (tempOrientation != ExifInterface.ORIENTATION_UNDEFINED) {
-                                    matrix.preRotate(tempOrientation);
-                                }
-
-                                Bitmap rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-                                if (bitmap != rotatedBitmap) {
-                                    bitmap.recycle();
-                                    bitmap = rotatedBitmap;
-                                }
-                            }
-
-                            Bitmap scaled;
-                            if (getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
-                                scaled = scaleCenterCrop(bitmap, getIntent().getIntExtra(ARG_HEIGHT, -1), getIntent().getIntExtra(ARG_WIDTH, -1));
-                                bitmap.recycle();
-                            } else {
-                                scaled = bitmap;
-                            }
-
-                            File photoFile = new File(getCacheDir() + "/pictureimportlib/", "pictureimportlib" + System.currentTimeMillis() + ".jpg");
-                            FileOutputStream stream = null;
-                            try {
-                                stream = new FileOutputStream(photoFile);
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-                                scaled.recycle();
-                                stream.flush();
-                                Intent intent = new Intent();
-                                intent.putExtra(RES_IMAGE_FILE, photoFile);
-                                setResult(RESULT_OK, intent);
+                            if (bitmap == null) {
+                                Log.e(TAG, "could not load bitmap, bailing out");
                                 finish();
-                                Log.d(TAG, "Image size on disk in kb: " + (photoFile.length() / 1024));
-                            } catch (Exception e) {
-                                setResult(Activity.RESULT_CANCELED);
-                                finish();
-                                Log.e(TAG, "Exception: ", e);
-                            } finally {
-                                if (stream != null) {
-                                    try {
-                                        stream.close();
-                                    } catch (IOException e) {
-                                        Log.e(TAG, "IOException: ", e);
-                                    }
-                                }
+                                return;
                             }
+
+                            processBitmapAndReturn(bitmap);
+
                         } catch (IOException e) {
+                            Log.e(TAG, "IOException: ", e);
                             setResult(Activity.RESULT_CANCELED);
                             finish();
                         } catch (OutOfMemoryError e) {
+                            Log.e(TAG, "OutOfMemoryError: ", e);
                             setResult(Activity.RESULT_CANCELED);
                             finish();
+                        } finally {
+                            progressDialog.dismiss();
                         }
-                        progressDialog.dismiss();
                     }
                 }.start();
+            } else {
+                finish();
             }
         } else {
             finish();
         }
+    }
+
+    private void processBitmapAndReturn(Bitmap bitmap) {
+        Bitmap scaled;
+        if (getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
+            scaled = scaleCenterCrop(bitmap, getIntent().getIntExtra(ARG_HEIGHT, -1), getIntent().getIntExtra(ARG_WIDTH, -1));
+            bitmap.recycle();
+        } else {
+            scaled = bitmap;
+        }
+
+        File photoFile = new File(getCacheDir() + "/pictureimportlib/", "pictureimportlib" + System.currentTimeMillis() + ".jpg");
+        FileOutputStream stream = null;
+        try {
+            stream = new FileOutputStream(photoFile);
+            scaled.compress(Bitmap.CompressFormat.JPEG, 80, stream);
+            scaled.recycle();
+            stream.flush();
+            Intent intent = new Intent();
+            intent.putExtra(RES_IMAGE_FILE, photoFile);
+            setResult(RESULT_OK, intent);
+            finish();
+            Log.d(TAG, "Image size on disk in kb: " + (photoFile.length() / 1024));
+        } catch (Exception e) {
+            setResult(Activity.RESULT_CANCELED);
+            finish();
+            Log.e(TAG, "Exception: ", e);
+        } finally {
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException e) {
+                    Log.e(TAG, "IOException: ", e);
+                }
+            }
+        }
+    }
+
+    private Bitmap loadBitmap(Intent data) throws IOException {
+        Bitmap bitmap;
+        try {
+            File file = new File(getCacheDir() + "/tmp/" + mImageUri.getLastPathSegment());
+            bitmap = Picasso.with(ImportPictureActivity.this).load(file).memoryPolicy(MemoryPolicy.NO_CACHE, MemoryPolicy.NO_STORE)
+                    .networkPolicy(NetworkPolicy.NO_CACHE).get();
+            file.delete();
+        } catch (IOException e) {
+            Log.e(TAG, "io exception", e);
+            if (data == null) {
+                Log.e(TAG, "data is null, bailing out");
+                return null;
+            }
+
+            bitmap = MediaStore.Images.Media.getBitmap(getContentResolver(), data.getData());
+            final int orientation;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && DocumentsContract.isDocumentUri(ImportPictureActivity.this, data.getData()) &&
+                    (ContextCompat.checkSelfPermission(ImportPictureActivity.this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)) {
+                orientation = getOrientationForDocuments(ImportPictureActivity.this, data.getData());
+            } else {
+                orientation = getOrientationForMedia(ImportPictureActivity.this, data.getData());
+            }
+
+            //for phones that dont give us orientation data
+            int tempOrientation = 0;
+            if (orientation == ExifInterface.ORIENTATION_UNDEFINED) {
+                File imageFile = getFromMediaUriPfd(ImportPictureActivity.this, ImportPictureActivity.this.getContentResolver(), data.getData());
+                ExifInterface exif = new ExifInterface(imageFile.getAbsolutePath());
+                switch (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)) {
+                    case ExifInterface.ORIENTATION_ROTATE_90:
+                        tempOrientation = 90;
+                        break;
+                    case ExifInterface.ORIENTATION_ROTATE_180:
+                        tempOrientation = 180;
+                        break;
+                    case ExifInterface.ORIENTATION_ROTATE_270:
+                        tempOrientation = 270;
+                        break;
+                    default:
+                        tempOrientation = 0;
+                        break;
+                }
+            }
+
+            Matrix matrix = new Matrix();
+            if (orientation != ExifInterface.ORIENTATION_UNDEFINED) {
+                matrix.preRotate(orientation);
+            } else if (tempOrientation != ExifInterface.ORIENTATION_UNDEFINED) {
+                matrix.preRotate(tempOrientation);
+            }
+
+            Bitmap rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+            if (bitmap != rotatedBitmap) {
+                bitmap.recycle();
+                bitmap = rotatedBitmap;
+            }
+        }
+
+        return bitmap;
+    }
+
+    private void startCropIntent(Bitmap bitmap) throws Exception {
+        File photoFile = createTemporaryFile("picture", ".jpg");
+        FileOutputStream stream = null;
+        try {
+            stream = new FileOutputStream(photoFile);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
+            bitmap.recycle();
+            stream.flush();
+            stream.close();
+
+            mImageUri = FileProvider.getUriForFile(ImportPictureActivity.this, getString(R.string.filesAuthority), photoFile);
+
+            Intent intent = new Intent("com.android.camera.action.CROP");
+            intent.setDataAndType(mImageUri,
+                    "image/*");
+
+            PackageManager pm = getApplicationContext().getPackageManager();
+
+            String matchPackage = null;
+            String matchClass = null;
+
+            for (ResolveInfo ri : pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+                Log.d(TAG, "match: " + ri.activityInfo.applicationInfo.packageName + " " +
+                        ri.activityInfo.name);
+                if ("com.google.android.apps.plus".equals(ri.activityInfo.applicationInfo.packageName)) {
+                    matchPackage = ri.activityInfo.applicationInfo.packageName;
+                    matchClass = ri.activityInfo.name;
+                }
+            }
+
+            for (ResolveInfo ri : pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+                intent = new Intent("com.android.camera.action.CROP");
+                intent.setDataAndType(mImageUri,
+                        "image/*");
+                intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                int width = getIntent().getIntExtra(ARG_WIDTH, -1);
+                int height = getIntent().getIntExtra(ARG_HEIGHT, -1);
+
+                intent.putExtra("aspectX", width);
+                intent.putExtra("aspectY", height);
+                intent.putExtra("outputX", width);
+                intent.putExtra("outputY", height);
+                intent.putExtra("scale", true);
+
+                if (matchPackage != null) {
+                    intent.setClassName(matchPackage, matchClass);
+                }
+                intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                grantUriPermission(ri.activityInfo.applicationInfo.packageName, mImageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                intent.putExtra(MediaStore.EXTRA_OUTPUT, mImageUri);
+                startActivityForResult(intent, REQ_CROP);
+                break;
+            }
+
+        } finally {
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException e) {
+                    Log.e(TAG, "IOException: ", e);
+                }
+            }
+        }
+    }
+
+    @Override
+    public void finish() {
+        super.finish();
     }
 
     private File createTemporaryFile(String part, String ext) throws Exception {
