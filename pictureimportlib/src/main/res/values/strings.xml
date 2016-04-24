@@ -1,5 +1,4 @@
 <resources>
-    <string name="app_name">PictureImporLib</string>
     <string name="filesAuthority">com.vol.pictureimportlib.files</string>
     <string name="select_or_take_picture">Select or take picture</string>
     <string name="please_wait">Please wait</string>
