@@ -8,7 +8,7 @@ android {
 		minSdkVersion 10
 		targetSdkVersion 23
 		versionCode 1
-		versionName "1.0"
+		versionName "1.1"
 	}
 
 	buildTypes {
@@ -39,7 +39,7 @@ ext {
 	siteUrl = 'https://github.com/skonstant/pictureimportlib'
 	gitUrl = 'https://github.com/skonstant/pictureimportlib.git'
 
-	libraryVersion = '1.0'
+	libraryVersion = '1.1'
 
 	developerId = 'skonstant'
 	developerName = 'Stéphane Konstantaropoulos'

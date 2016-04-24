@@ -3,8 +3,9 @@ Android picture import library
 
 Drop in library to import pictures from documents, gallery and camera. No permission needed. Cropping supported.
 
-Just include the library:
+Just include the library in your build.gradle:
 
+compile 'com.vol:pictureimportlib:1.1'
 
 Change the files provider authority in strings:
 
