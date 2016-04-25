@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
@@ -38,6 +39,7 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -189,6 +191,14 @@ public class ImportPictureActivity extends Activity {
         return dest;
     }
 
+    private boolean isCropAvailable() {
+        Intent intent = new Intent("com.android.camera.action.CROP");
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            return true;
+        }
+        return false;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -200,7 +210,7 @@ public class ImportPictureActivity extends Activity {
 
         File photo;
         try {
-            photo = this.createTemporaryFile("picture", ".jpg");
+            photo = this.createTemporaryFile("image", ".jpg");
             photo.delete();
         } catch (Exception e) {
             Log.d(TAG, "Can't create file to take picture!");
@@ -219,8 +229,7 @@ public class ImportPictureActivity extends Activity {
         PackageManager pm = getApplicationContext().getPackageManager();
         for (ResolveInfo ri : pm.queryIntentActivities(takePhotoIntent, PackageManager.MATCH_DEFAULT_ONLY)) {
             Intent intent = new Intent();
-            intent.setClassName(ri.activityInfo.applicationInfo.packageName,
-                    ri.activityInfo.name);
+            intent.setClassName(ri.activityInfo.applicationInfo.packageName, ri.activityInfo.name);
             intent.setAction(MediaStore.ACTION_IMAGE_CAPTURE);
             intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             grantUriPermission(ri.activityInfo.applicationInfo.packageName, mImageUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -262,7 +271,7 @@ public class ImportPictureActivity extends Activity {
                                 return;
                             }
 
-                            if (getIntent().getBooleanExtra(ARG_CROP, false) && getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
+                            if (isCropAvailable() && getIntent().getBooleanExtra(ARG_CROP, false) && getIntent().hasExtra(ARG_HEIGHT) && getIntent().hasExtra(ARG_WIDTH)) {
                                 startCropIntent(bitmap);
                                 return;
                             } else {
@@ -355,10 +364,17 @@ public class ImportPictureActivity extends Activity {
     private Bitmap loadBitmap(Intent data) throws IOException {
         Bitmap bitmap;
         try {
-            File file = new File(getCacheDir() + "/tmp/" + mImageUri.getLastPathSegment());
-            bitmap = Picasso.with(ImportPictureActivity.this).load(file).memoryPolicy(MemoryPolicy.NO_CACHE, MemoryPolicy.NO_STORE)
-                    .networkPolicy(NetworkPolicy.NO_CACHE).get();
-            file.delete();
+            if (data == null) {
+                File file = new File(getCacheDir() + "/tmp/" + mImageUri.getLastPathSegment());
+                bitmap = Picasso.with(ImportPictureActivity.this).load(file).memoryPolicy(MemoryPolicy.NO_CACHE, MemoryPolicy.NO_STORE)
+                        .networkPolicy(NetworkPolicy.NO_CACHE).get();
+                file.delete();
+            }
+            else {
+                Uri uri = data.getData();
+                InputStream inputStream = getContentResolver().openInputStream(uri);
+                bitmap = BitmapFactory.decodeStream(inputStream);
+            }
         } catch (IOException e) {
             Log.e(TAG, "io exception", e);
             if (data == null) {
@@ -414,20 +430,18 @@ public class ImportPictureActivity extends Activity {
     }
 
     private void startCropIntent(Bitmap bitmap) throws Exception {
-        File photoFile = createTemporaryFile("picture", ".jpg");
+        File photoFile = createTemporaryFile("image", ".jpg");
         FileOutputStream stream = null;
         try {
             stream = new FileOutputStream(photoFile);
             bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
             bitmap.recycle();
             stream.flush();
-            stream.close();
 
             mImageUri = FileProvider.getUriForFile(ImportPictureActivity.this, getString(R.string.filesAuthority), photoFile);
 
             Intent intent = new Intent("com.android.camera.action.CROP");
-            intent.setDataAndType(mImageUri,
-                    "image/*");
+            intent.setDataAndType(mImageUri, "image/*");
 
             PackageManager pm = getApplicationContext().getPackageManager();
 
@@ -435,8 +449,7 @@ public class ImportPictureActivity extends Activity {
             String matchClass = null;
 
             for (ResolveInfo ri : pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
-                Log.d(TAG, "match: " + ri.activityInfo.applicationInfo.packageName + " " +
-                        ri.activityInfo.name);
+                Log.d(TAG, "match: " + ri.activityInfo.applicationInfo.packageName + " " + ri.activityInfo.name);
                 if ("com.google.android.apps.plus".equals(ri.activityInfo.applicationInfo.packageName)) {
                     matchPackage = ri.activityInfo.applicationInfo.packageName;
                     matchClass = ri.activityInfo.name;
@@ -445,8 +458,7 @@ public class ImportPictureActivity extends Activity {
 
             for (ResolveInfo ri : pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
                 intent = new Intent("com.android.camera.action.CROP");
-                intent.setDataAndType(mImageUri,
-                        "image/*");
+                intent.setDataAndType(mImageUri, "image/*");
                 intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 int width = getIntent().getIntExtra(ARG_WIDTH, -1);
                 int height = getIntent().getIntExtra(ARG_HEIGHT, -1);
